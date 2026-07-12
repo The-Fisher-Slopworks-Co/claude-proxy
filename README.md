@@ -38,7 +38,33 @@ bun index.ts
 ```
 
 Config via env (see `.env.example`): `HOST`, `PORT`, `DEFAULT_MODEL`
-(default `sonnet`), `ALLOWED_TOOLS`.
+(default `sonnet`), `ALLOWED_TOOLS`, `LOG_LEVEL`.
+
+## Observability
+
+One event per line on stdout (warnings/errors on stderr). On a terminal you
+get readable `HH:MM:SS LEVEL event key=value` text; when piped or running as
+a service the same events come out as JSON lines for `jq`/log collectors
+(override with `LOG_FORMAT=pretty|json`). Every response carries an
+`x-request-id` header matching the `reqId` field in the logs.
+
+Events at `LOG_LEVEL=info` (default):
+
+- `startup` — bind address, default model, tools, auth method, log level
+- `request.start` — reqId, resolved + requested model, stream flag, message
+  count, prompt/system sizes
+- `request.done` — status, total duration, SDK/API latency, turns, token
+  usage, cost (USD), finish reason; streams add TTFT, chunk count, output size
+- `request.error` / `request.reject` — what failed and why
+- `client.abort` / `stream.cancel` — client disconnected mid-request
+
+`LOG_LEVEL=debug` adds full prompt and response texts (`request.prompt`,
+`request.response`), the SDK message flow (`sdk.message`), Claude Code
+subprocess stderr (`claude.stderr`), and `/health`–`/v1/models` access logs.
+
+```sh
+LOG_LEVEL=debug bun index.ts | jq 'select(.event == "request.done")'
+```
 
 ## Usage
 
