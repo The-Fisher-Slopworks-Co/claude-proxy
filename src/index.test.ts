@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { buildPrompt, textOf } from "./index";
+import { buildPrompt, textOf } from "./openai";
 
 test("textOf handles string and part-array content", () => {
   expect(textOf("hi")).toBe("hi");

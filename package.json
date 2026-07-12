@@ -1,8 +1,8 @@
 {
   "name": "claude-proxy",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "scripts": {
-    "dev": "bun --hot index.ts"
+    "dev": "bun --hot src/index.ts"
   },
   "type": "module",
   "private": true,

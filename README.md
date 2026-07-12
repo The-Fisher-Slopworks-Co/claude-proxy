@@ -33,7 +33,7 @@ to the Claude Code subprocess, so usage always bills the subscription.
 ## Run
 
 ```sh
-bun index.ts
+bun src/index.ts
 # claude-proxy: http://127.0.0.1:8787/v1
 ```
 
@@ -63,7 +63,7 @@ Events at `LOG_LEVEL=info` (default):
 subprocess stderr (`claude.stderr`), and `/health`–`/v1/models` access logs.
 
 ```sh
-LOG_LEVEL=debug bun index.ts | jq 'select(.event == "request.done")'
+LOG_LEVEL=debug bun src/index.ts | jq 'select(.event == "request.done")'
 ```
 
 ## Usage

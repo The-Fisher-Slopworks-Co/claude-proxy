@@ -1,160 +1,20 @@
+// POST /v1/chat/completions — translate OpenAI chat requests to SDK queries.
 import {
   query,
   type Options,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-
-// ---- config ----
-const HOST = process.env.HOST || "127.0.0.1";
-const PORT = Number(process.env.PORT || 8787);
-const DEFAULT_MODEL = process.env.DEFAULT_MODEL || "sonnet";
-// ponytail: comma-separated tool names, empty = all built-in tools off (safe default)
-const ALLOWED_TOOLS = (process.env.ALLOWED_TOOLS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-const LOG_LEVEL = process.env.LOG_LEVEL === "debug" ? "debug" : "info";
-// pretty (key=value text) on a terminal, JSON lines when piped/collected
-const LOG_FORMAT =
-  process.env.LOG_FORMAT === "json" || process.env.LOG_FORMAT === "pretty"
-    ? process.env.LOG_FORMAT
-    : process.stdout.isTTY
-      ? "pretty"
-      : "json";
-
-// ---- logging ----
-type LogLevel = "debug" | "info" | "warn" | "error";
-function log(
-  level: LogLevel,
-  event: string,
-  fields: Record<string, unknown> = {},
-) {
-  if (level === "debug" && LOG_LEVEL !== "debug") return;
-  let line: string;
-  if (LOG_FORMAT === "json") {
-    line = JSON.stringify({
-      ts: new Date().toISOString(),
-      level,
-      event,
-      ...fields,
-    });
-  } else {
-    const kv = Object.entries(fields)
-      .map(([k, v]) =>
-        typeof v === "string" && !/\s/.test(v)
-          ? `${k}=${v}`
-          : `${k}=${JSON.stringify(v)}`,
-      )
-      .join(" ");
-    line = `${new Date().toISOString().slice(11, 23)} ${level.toUpperCase().padEnd(5)} ${event}${kv ? "  " + kv : ""}`;
-  }
-  if (level === "error") console.error(line);
-  else if (level === "warn") console.warn(line);
-  else console.log(line);
-}
-
-// Never let the subprocess see ANTHROPIC_API_KEY — it would silently win over
-// subscription OAuth and bill the API key instead.
-const childEnv: Record<string, string | undefined> = {
-  ...process.env,
-  ANTHROPIC_API_KEY: undefined,
-};
-
-const MODELS = [
-  "sonnet",
-  "opus",
-  "haiku",
-  "claude-sonnet-5",
-  "claude-opus-4-8",
-  "claude-haiku-4-5-20251001",
-];
-
-// ---- OpenAI request shapes ----
-type ContentPart = { type?: string; text?: string };
-type ChatMessage = { role: string; content: string | ContentPart[] | null };
-type ChatRequest = {
-  model?: string;
-  messages?: ChatMessage[];
-  stream?: boolean;
-};
-
-export function textOf(content: ChatMessage["content"]): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content))
-    return content
-      .map((p) => (typeof p.text === "string" ? p.text : ""))
-      .filter(Boolean)
-      .join("\n");
-  return "";
-}
-
-export function buildPrompt(messages: ChatMessage[]): {
-  systemPrompt: string | undefined;
-  prompt: string;
-} {
-  const systemPrompt =
-    messages
-      .filter((m) => m.role === "system" || m.role === "developer")
-      .map((m) => textOf(m.content))
-      .filter(Boolean)
-      .join("\n\n") || undefined;
-
-  const turns = messages.filter(
-    (m) => m.role === "user" || m.role === "assistant",
-  );
-  // ponytail: stateless — history is rendered into one prompt; switch to SDK
-  // resume/sessions if turn fidelity ever matters
-  const prompt =
-    turns.length === 1 && turns[0]!.role === "user"
-      ? textOf(turns[0]!.content)
-      : turns
-          .map(
-            (m) =>
-              `${m.role === "user" ? "Human" : "Assistant"}: ${textOf(m.content)}`,
-          )
-          .join("\n\n") + "\n\nAssistant:";
-  return { systemPrompt, prompt };
-}
-
-// ---- OpenAI response helpers ----
-const now = () => Math.floor(Date.now() / 1000);
-const STARTED = now();
-
-const oaiError = (
-  status: number,
-  message: string,
-  type = "api_error",
-  reqId?: string,
-) =>
-  Response.json(
-    { error: { message, type } },
-    { status, headers: reqId ? { "x-request-id": reqId } : undefined },
-  );
-
-const finishReason = (stop: string | null) =>
-  stop === "max_tokens" ? "length" : "stop";
-
-function usageOf(u: {
-  input_tokens?: number | null;
-  output_tokens?: number | null;
-  cache_creation_input_tokens?: number | null;
-  cache_read_input_tokens?: number | null;
-}) {
-  const prompt_tokens =
-    (u.input_tokens ?? 0) +
-    (u.cache_creation_input_tokens ?? 0) +
-    (u.cache_read_input_tokens ?? 0);
-  const completion_tokens = u.output_tokens ?? 0;
-  return {
-    prompt_tokens,
-    completion_tokens,
-    total_tokens: prompt_tokens + completion_tokens,
-  };
-}
-
-const resolveModel = (m: string | undefined) =>
-  // ponytail: some OpenAI clients hardcode gpt-* — route them to the default
-  !m || m.startsWith("gpt-") ? DEFAULT_MODEL : m;
+import { ALLOWED_TOOLS, childEnv } from "./config";
+import { log } from "./log";
+import {
+  buildPrompt,
+  finishReason,
+  now,
+  oaiError,
+  resolveModel,
+  usageOf,
+  type ChatRequest,
+} from "./openai";
 
 function queryOptions(
   reqId: string,
@@ -188,8 +48,7 @@ const resultFields = (msg: SDKResultMessage) => ({
   usage: usageOf(msg.usage),
 });
 
-// ---- handlers ----
-async function chatCompletions(req: Request): Promise<Response> {
+export async function chatCompletions(req: Request): Promise<Response> {
   const t0 = performance.now();
   const ms = () => Math.round(performance.now() - t0);
   const reqId = crypto.randomUUID();
@@ -428,64 +287,5 @@ async function chatCompletions(req: Request): Promise<Response> {
       Connection: "keep-alive",
       "x-request-id": reqId,
     },
-  });
-}
-
-// ---- startup ----
-if (import.meta.main) {
-  if (!Bun.which("claude")) {
-    log("error", "startup.failed", {
-      reason:
-        "Claude Code CLI not found on PATH. Install: bun add -g @anthropic-ai/claude-code (then: claude setup-token)",
-    });
-    process.exit(1);
-  }
-  if (process.env.ANTHROPIC_API_KEY)
-    log("warn", "startup.api_key_ignored", {
-      detail:
-        "ANTHROPIC_API_KEY is set but will NOT be passed to Claude Code — subscription OAuth only",
-    });
-
-  Bun.serve({
-    hostname: HOST,
-    port: PORT,
-    idleTimeout: 255, // ponytail: Bun max; non-stream completions can be slow
-    routes: {
-      "/health": () => {
-        log("debug", "request.access", { route: "/health" });
-        return Response.json({ status: "ok" });
-      },
-      "/v1/models": () => {
-        log("debug", "request.access", { route: "/v1/models" });
-        return Response.json({
-          object: "list",
-          data: MODELS.map((id) => ({
-            id,
-            object: "model",
-            created: STARTED,
-            owned_by: "anthropic",
-          })),
-        });
-      },
-      "/v1/chat/completions": { POST: chatCompletions },
-    },
-    fetch: (req) => {
-      log("info", "request.reject", {
-        reason: "unknown route",
-        method: req.method,
-        path: new URL(req.url).pathname,
-      });
-      return oaiError(404, "Not found", "invalid_request_error");
-    },
-  });
-
-  log("info", "startup", {
-    url: `http://${HOST}:${PORT}/v1`,
-    default_model: DEFAULT_MODEL,
-    tools: ALLOWED_TOOLS.length ? ALLOWED_TOOLS : "disabled",
-    auth: process.env.CLAUDE_CODE_OAUTH_TOKEN
-      ? "CLAUDE_CODE_OAUTH_TOKEN (subscription)"
-      : "CLI stored login (no CLAUDE_CODE_OAUTH_TOKEN set)",
-    log_level: LOG_LEVEL,
   });
 }
