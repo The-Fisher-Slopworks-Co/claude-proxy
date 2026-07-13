@@ -3,6 +3,7 @@ import {
   query,
   type Options,
   type SDKResultMessage,
+  type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { ALLOWED_TOOLS, childEnv } from "./config";
 import { log } from "./log";
@@ -14,7 +15,19 @@ import {
   resolveModel,
   usageOf,
   type ChatRequest,
+  type PromptBlock,
 } from "./openai";
+
+// Streaming-input mode is the only way to pass image blocks to the SDK.
+async function* userTurn(
+  content: PromptBlock[],
+): AsyncIterable<SDKUserMessage> {
+  yield {
+    type: "user",
+    parent_tool_use_id: null,
+    message: { role: "user", content },
+  };
+}
 
 function queryOptions(
   reqId: string,
@@ -74,12 +87,18 @@ export async function chatCompletions(req: Request): Promise<Response> {
   const model = resolveModel(
     typeof body.model === "string" ? body.model : undefined,
   );
-  const { systemPrompt, prompt } = buildPrompt(body.messages);
-  if (!prompt) {
-    log("warn", "request.reject", { reqId, reason: "no text content" });
+  const { systemPrompt, content } = buildPrompt(body.messages);
+  const images = content.filter((b) => b.type === "image").length;
+  // text-only rendering, used for logs and for the plain string prompt path
+  const prompt = content
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+  if (content.length === 0) {
+    log("warn", "request.reject", { reqId, reason: "no content" });
     return oaiError(
       400,
-      "No text content found in 'messages'",
+      "No text or image content found in 'messages'",
       "invalid_request_error",
       reqId,
     );
@@ -91,6 +110,7 @@ export async function chatCompletions(req: Request): Promise<Response> {
     requested_model: body.model ?? null,
     stream: !!body.stream,
     messages: body.messages.length,
+    images,
     prompt_chars: prompt.length,
     system_chars: systemPrompt?.length ?? 0,
   });
@@ -104,7 +124,7 @@ export async function chatCompletions(req: Request): Promise<Response> {
 
   const created = now();
   const q = query({
-    prompt,
+    prompt: images ? userTurn(content) : prompt,
     options: queryOptions(reqId, model, systemPrompt, !!body.stream, ac),
   });
 

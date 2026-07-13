@@ -14,21 +14,56 @@ test("textOf handles string and part-array content", () => {
 });
 
 test("single user message passes through verbatim", () => {
-  const { systemPrompt, prompt } = buildPrompt([
+  const { systemPrompt, content } = buildPrompt([
     { role: "system", content: "be terse" },
     { role: "user", content: "hello" },
   ]);
   expect(systemPrompt).toBe("be terse");
-  expect(prompt).toBe("hello");
+  expect(content).toEqual([{ type: "text", text: "hello" }]);
 });
 
 test("multi-turn history renders as a transcript", () => {
-  const { prompt } = buildPrompt([
+  const { content } = buildPrompt([
     { role: "user", content: "2+2?" },
     { role: "assistant", content: "4" },
     { role: "user", content: [{ type: "text", text: "and +1?" }] },
   ]);
-  expect(prompt).toBe("Human: 2+2?\n\nAssistant: 4\n\nHuman: and +1?\n\nAssistant:");
+  expect(content).toEqual([
+    {
+      type: "text",
+      text: "Human: 2+2?\n\nAssistant: 4\n\nHuman: and +1?\n\nAssistant:",
+    },
+  ]);
+});
+
+test("images stay in place in the interleaved transcript", () => {
+  const { content } = buildPrompt([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "first:" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+        { type: "text", text: "second:" },
+        { type: "image_url", image_url: { url: "https://x.test/a.jpg" } },
+        { type: "image_url" }, // no url — dropped
+      ],
+    },
+    { role: "assistant", content: "the second" },
+    { role: "user", content: "why?" },
+  ]);
+  expect(content).toEqual([
+    { type: "text", text: "Human: first:" },
+    {
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: "AAAA" },
+    },
+    { type: "text", text: "\nsecond:" },
+    { type: "image", source: { type: "url", url: "https://x.test/a.jpg" } },
+    {
+      type: "text",
+      text: "\n\nAssistant: the second\n\nHuman: why?\n\nAssistant:",
+    },
+  ]);
 });
 
 test("modelEntry maps family pricing and modalities", () => {

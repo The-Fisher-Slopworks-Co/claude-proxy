@@ -1,7 +1,16 @@
 // OpenAI wire format: request shapes, prompt building, response helpers.
+import type {
+  Base64ImageSource,
+  ImageBlockParam,
+  TextBlockParam,
+} from "@anthropic-ai/sdk/resources";
 import { DEFAULT_MODEL } from "./config";
 
-export type ContentPart = { type?: string; text?: string };
+export type ContentPart = {
+  type?: string;
+  text?: string;
+  image_url?: { url?: string } | string;
+};
 export type ChatMessage = {
   role: string;
   content: string | ContentPart[] | null;
@@ -22,9 +31,28 @@ export function textOf(content: ChatMessage["content"]): string {
   return "";
 }
 
+export type PromptBlock = TextBlockParam | ImageBlockParam;
+
+// OpenAI image_url part (data: or http(s) URL) -> Anthropic image block.
+function imageBlockOf(p: ContentPart): ImageBlockParam | undefined {
+  const url = typeof p.image_url === "string" ? p.image_url : p.image_url?.url;
+  if (p.type !== "image_url" || !url) return undefined;
+  const data = url.match(/^data:(image\/[\w.+-]+);base64,(.+)$/s);
+  return {
+    type: "image",
+    source: data
+      ? {
+          type: "base64",
+          media_type: data[1] as Base64ImageSource["media_type"],
+          data: data[2]!,
+        }
+      : { type: "url", url },
+  };
+}
+
 export function buildPrompt(messages: ChatMessage[]): {
   systemPrompt: string | undefined;
-  prompt: string;
+  content: PromptBlock[];
 } {
   const systemPrompt =
     messages
@@ -36,18 +64,37 @@ export function buildPrompt(messages: ChatMessage[]): {
   const turns = messages.filter(
     (m) => m.role === "user" || m.role === "assistant",
   );
-  // ponytail: stateless — history is rendered into one prompt; switch to SDK
-  // resume/sessions if turn fidelity ever matters
-  const prompt =
-    turns.length === 1 && turns[0]!.role === "user"
-      ? textOf(turns[0]!.content)
-      : turns
-          .map(
-            (m) =>
-              `${m.role === "user" ? "Human" : "Assistant"}: ${textOf(m.content)}`,
-          )
-          .join("\n\n") + "\n\nAssistant:";
-  return { systemPrompt, prompt };
+  // ponytail: stateless — history is rendered into one interleaved block list
+  // (text transcript with images kept in place); switch to SDK resume/sessions
+  // if turn fidelity ever matters
+  const single = turns.length === 1 && turns[0]!.role === "user";
+  const content: PromptBlock[] = [];
+  let buf = "";
+  const flush = () => {
+    if (buf) content.push({ type: "text", text: buf });
+    buf = "";
+  };
+  turns.forEach((m, i) => {
+    if (!single)
+      buf += (i ? "\n\n" : "") + (m.role === "user" ? "Human: " : "Assistant: ");
+    if (typeof m.content === "string") buf += m.content;
+    else if (Array.isArray(m.content)) {
+      let sep = "";
+      for (const p of m.content) {
+        const img = imageBlockOf(p);
+        if (img) {
+          flush();
+          content.push(img);
+        } else if (typeof p.text === "string" && p.text) {
+          buf += sep + p.text;
+          sep = "\n";
+        }
+      }
+    }
+  });
+  if (!single) buf += "\n\nAssistant:";
+  flush();
+  return { systemPrompt, content };
 }
 
 export const now = () => Math.floor(Date.now() / 1000);
@@ -105,8 +152,6 @@ export function modelEntry(id: string, created: number, name = id) {
     name,
     context_length: 200000,
     architecture: {
-      // Real model modalities (all current Claude models take images);
-      // the proxy itself still strips non-text parts before the SDK.
       modality: "text+image->text",
       input_modalities: ["text", "image"],
       output_modalities: ["text"],
