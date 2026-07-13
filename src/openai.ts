@@ -84,6 +84,47 @@ export function usageOf(u: {
   };
 }
 
+// USD strings (OpenRouter format): prompt, completion, cache read, cache write
+// (per token), image (per max-size image ≈ 1600 tokens × input price).
+// ponytail: family heuristic off the current Anthropic price sheet; update on price changes
+const PRICING: Array<[RegExp, [string, string, string, string, string]]> = [
+  [/opus/, ["0.000015", "0.000075", "0.0000015", "0.00001875", "0.024"]],
+  [/haiku/, ["0.000001", "0.000005", "0.0000001", "0.00000125", "0.0016"]],
+  [/./, ["0.000003", "0.000015", "0.0000003", "0.00000375", "0.0048"]], // sonnet & default
+];
+
+// OpenAI model object + OpenRouter extensions (pricing, architecture).
+export function modelEntry(id: string, created: number, name = id) {
+  const [prompt, completion, input_cache_read, input_cache_write, image] =
+    PRICING.find(([re]) => re.test(id))![1];
+  return {
+    id,
+    object: "model",
+    created,
+    owned_by: "anthropic",
+    name,
+    context_length: 200000,
+    architecture: {
+      // Real model modalities (all current Claude models take images);
+      // the proxy itself still strips non-text parts before the SDK.
+      modality: "text+image->text",
+      input_modalities: ["text", "image"],
+      output_modalities: ["text"],
+      tokenizer: "Claude",
+      instruct_type: null,
+    },
+    pricing: {
+      prompt,
+      completion,
+      request: "0",
+      image,
+      input_cache_read,
+      input_cache_write,
+    },
+    per_request_limits: null,
+  };
+}
+
 export const resolveModel = (m: string | undefined) =>
   // ponytail: some OpenAI clients hardcode gpt-* — route them to the default
   !m || m.startsWith("gpt-") ? DEFAULT_MODEL : m;
