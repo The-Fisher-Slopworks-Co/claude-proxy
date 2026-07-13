@@ -131,6 +131,54 @@ export function usageOf(u: {
   };
 }
 
+// ---- response encoding: the exact bytes clients receive ----
+
+export function completion(
+  id: string,
+  created: number,
+  model: string,
+  text: string,
+  finish: string,
+  usage: ReturnType<typeof usageOf>,
+) {
+  return {
+    id,
+    object: "chat.completion",
+    created,
+    model,
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content: text },
+        finish_reason: finish,
+      },
+    ],
+    usage,
+  };
+}
+
+export const chunk = (
+  id: string,
+  created: number,
+  model: string,
+  delta: object,
+  finish: string | null = null,
+  usage?: object,
+) =>
+  `data: ${JSON.stringify({
+    id,
+    object: "chat.completion.chunk",
+    created,
+    model,
+    choices: [{ index: 0, delta, finish_reason: finish }],
+    ...(usage ? { usage } : {}),
+  })}\n\n`;
+
+export const sseError = (message: string, type = "api_error") =>
+  `data: ${JSON.stringify({ error: { message, type } })}\n\n`;
+
+export const SSE_DONE = "data: [DONE]\n\n";
+
 // USD strings (OpenRouter format): prompt, completion, cache read, cache write
 // (per token), image (per max-size image ≈ 1600 tokens × input price).
 // ponytail: family heuristic off the current Anthropic price sheet; update on price changes

@@ -1,5 +1,15 @@
 import { test, expect } from "bun:test";
-import { buildPrompt, modelEntry, textOf } from "./openai";
+import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
+import { interpretResult } from "./chat";
+import {
+  buildPrompt,
+  chunk,
+  completion,
+  modelEntry,
+  sseError,
+  SSE_DONE,
+  textOf,
+} from "./openai";
 
 test("textOf handles string and part-array content", () => {
   expect(textOf("hi")).toBe("hi");
@@ -64,6 +74,76 @@ test("images stay in place in the interleaved transcript", () => {
       text: "\n\nAssistant: the second\n\nHuman: why?\n\nAssistant:",
     },
   ]);
+});
+
+test("chunk/sseError/SSE_DONE emit byte-exact SSE frames", () => {
+  expect(chunk("c", 5, "m", { content: "hi" })).toBe(
+    `data: {"id":"c","object":"chat.completion.chunk","created":5,"model":"m","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}\n\n`,
+  );
+  expect(chunk("c", 5, "m", {}, "stop", { total_tokens: 3 })).toBe(
+    `data: {"id":"c","object":"chat.completion.chunk","created":5,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"total_tokens":3}}\n\n`,
+  );
+  expect(sseError("boom")).toBe(
+    `data: {"error":{"message":"boom","type":"api_error"}}\n\n`,
+  );
+  expect(SSE_DONE).toBe("data: [DONE]\n\n");
+});
+
+test("completion builds the OpenAI response object", () => {
+  expect(
+    completion("c", 5, "m", "hi", "stop", {
+      prompt_tokens: 1,
+      completion_tokens: 2,
+      total_tokens: 3,
+    }),
+  ).toEqual({
+    id: "c",
+    object: "chat.completion",
+    created: 5,
+    model: "m",
+    choices: [
+      {
+        index: 0,
+        message: { role: "assistant", content: "hi" },
+        finish_reason: "stop",
+      },
+    ],
+    usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+  });
+});
+
+test("interpretResult classifies success and error results", () => {
+  const base = {
+    type: "result",
+    duration_ms: 1,
+    duration_api_ms: 1,
+    num_turns: 1,
+    total_cost_usd: 0,
+    session_id: "s",
+    usage: { input_tokens: 1, output_tokens: 2 },
+  };
+  expect(
+    interpretResult({
+      ...base,
+      subtype: "success",
+      is_error: false,
+      result: "hi",
+      stop_reason: "max_tokens",
+    } as SDKResultMessage),
+  ).toEqual({
+    ok: true,
+    text: "hi",
+    finish: "length",
+    usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+  });
+  expect(
+    interpretResult({
+      ...base,
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["a", "b"],
+    } as unknown as SDKResultMessage),
+  ).toEqual({ ok: false, subtype: "error_during_execution", detail: "a; b" });
 });
 
 test("modelEntry maps family pricing and modalities", () => {

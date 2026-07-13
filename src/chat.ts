@@ -9,14 +9,35 @@ import { ALLOWED_TOOLS, childEnv } from "./config";
 import { log } from "./log";
 import {
   buildPrompt,
+  chunk,
+  completion,
   finishReason,
   now,
   oaiError,
   resolveModel,
+  sseError,
+  SSE_DONE,
   usageOf,
   type ChatRequest,
   type PromptBlock,
 } from "./openai";
+
+// One place that decides what an SDK result means; both response paths
+// (JSON and SSE) consume this and keep only their transport.
+export function interpretResult(msg: SDKResultMessage) {
+  if (msg.subtype === "success" && !msg.is_error)
+    return {
+      ok: true as const,
+      text: msg.result,
+      finish: finishReason(msg.stop_reason),
+      usage: usageOf(msg.usage),
+    };
+  return {
+    ok: false as const,
+    subtype: msg.subtype,
+    detail: msg.subtype === "success" ? msg.result : msg.errors.join("; "),
+  };
+}
 
 // Streaming-input mode is the only way to pass image blocks to the SDK.
 async function* userTurn(
@@ -137,45 +158,31 @@ export async function chatCompletions(req: Request): Promise<Response> {
           subtype: "subtype" in msg ? msg.subtype : undefined,
         });
         if (msg.type !== "result") continue;
-        if (msg.subtype === "success" && !msg.is_error) {
+        const r = interpretResult(msg);
+        if (r.ok) {
           log("info", "request.done", {
             reqId,
             status: 200,
             duration_ms: ms(),
-            finish: finishReason(msg.stop_reason),
+            finish: r.finish,
             ...resultFields(msg),
           });
-          log("debug", "request.response", { reqId, text: msg.result });
+          log("debug", "request.response", { reqId, text: r.text });
           return Response.json(
-            {
-              id,
-              object: "chat.completion",
-              created,
-              model,
-              choices: [
-                {
-                  index: 0,
-                  message: { role: "assistant", content: msg.result },
-                  finish_reason: finishReason(msg.stop_reason),
-                },
-              ],
-              usage: usageOf(msg.usage),
-            },
+            completion(id, created, model, r.text, r.finish, r.usage),
             { headers: { "x-request-id": reqId } },
           );
         }
-        const detail =
-          msg.subtype === "success" ? msg.result : msg.errors.join("; ");
         log("error", "request.error", {
           reqId,
           duration_ms: ms(),
-          subtype: msg.subtype,
-          detail,
+          subtype: r.subtype,
+          detail: r.detail,
           ...resultFields(msg),
         });
         return oaiError(
           502,
-          `Claude Code error (${msg.subtype}): ${detail}`,
+          `Claude Code error (${r.subtype}): ${r.detail}`,
           "api_error",
           reqId,
         );
@@ -196,19 +203,8 @@ export async function chatCompletions(req: Request): Promise<Response> {
 
   // streaming (SSE)
   const enc = new TextEncoder();
-  const chunk = (
-    delta: object,
-    finish: string | null = null,
-    usage?: object,
-  ) =>
-    `data: ${JSON.stringify({
-      id,
-      object: "chat.completion.chunk",
-      created,
-      model,
-      choices: [{ index: 0, delta, finish_reason: finish }],
-      ...(usage ? { usage } : {}),
-    })}\n\n`;
+  const frame = (delta: object, finish: string | null = null, usage?: object) =>
+    chunk(id, created, model, delta, finish, usage);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -217,7 +213,7 @@ export async function chatCompletions(req: Request): Promise<Response> {
       let chunks = 0;
       let text = "";
       try {
-        send(chunk({ role: "assistant", content: "" }));
+        send(frame({ role: "assistant", content: "" }));
         for await (const msg of q) {
           if (msg.type === "stream_event" && msg.parent_tool_use_id === null) {
             const ev = msg.event;
@@ -229,11 +225,12 @@ export async function chatCompletions(req: Request): Promise<Response> {
               ttftMs ??= ms();
               chunks++;
               text += ev.delta.text;
-              send(chunk({ content: ev.delta.text }));
+              send(frame({ content: ev.delta.text }));
             }
           } else if (msg.type === "result") {
-            if (msg.subtype === "success" && !msg.is_error) {
-              send(chunk({}, finishReason(msg.stop_reason), usageOf(msg.usage)));
+            const r = interpretResult(msg);
+            if (r.ok) {
+              send(frame({}, r.finish, r.usage));
               log("info", "request.done", {
                 reqId,
                 status: 200,
@@ -242,28 +239,19 @@ export async function chatCompletions(req: Request): Promise<Response> {
                 ttft_ms: ttftMs,
                 chunks,
                 completion_chars: text.length,
-                finish: finishReason(msg.stop_reason),
+                finish: r.finish,
                 ...resultFields(msg),
               });
               log("debug", "request.response", { reqId, text });
             } else {
-              const detail =
-                msg.subtype === "success" ? msg.result : msg.errors.join("; ");
               log("error", "request.error", {
                 reqId,
                 duration_ms: ms(),
-                subtype: msg.subtype,
-                detail,
+                subtype: r.subtype,
+                detail: r.detail,
                 ...resultFields(msg),
               });
-              send(
-                `data: ${JSON.stringify({
-                  error: {
-                    message: `Claude Code error (${msg.subtype}): ${detail}`,
-                    type: "api_error",
-                  },
-                })}\n\n`,
-              );
+              send(sseError(`Claude Code error (${r.subtype}): ${r.detail}`));
             }
             break;
           } else {
@@ -274,17 +262,13 @@ export async function chatCompletions(req: Request): Promise<Response> {
             });
           }
         }
-        send("data: [DONE]\n\n");
+        send(SSE_DONE);
       } catch (e) {
         if (!ac.signal.aborted) {
           const detail = e instanceof Error ? e.message : String(e);
           log("error", "request.error", { reqId, duration_ms: ms(), detail });
           try {
-            send(
-              `data: ${JSON.stringify({
-                error: { message: detail, type: "api_error" },
-              })}\n\ndata: [DONE]\n\n`,
-            );
+            send(sseError(detail) + SSE_DONE);
           } catch {}
         }
       } finally {
