@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The Fisher Slopworks Co
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // ---- config ----
 export const HOST = process.env.HOST || "127.0.0.1";
 export const PORT = Number(process.env.PORT || 8787);

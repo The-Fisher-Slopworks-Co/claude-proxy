@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The Fisher Slopworks Co
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // OpenAI wire format: request shapes, prompt building, response helpers.
 import type {
   Base64ImageSource,

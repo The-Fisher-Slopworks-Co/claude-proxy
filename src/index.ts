@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The Fisher Slopworks Co
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // ---- startup ----
 import { chatCompletions } from "./chat";
 import { ALLOWED_TOOLS, DEFAULT_MODEL, HOST, LOG_LEVEL, MODELS, PORT } from "./config";

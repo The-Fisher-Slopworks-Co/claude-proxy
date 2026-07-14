@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The Fisher Slopworks Co
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 import { test, expect } from "bun:test";
 import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { interpretResult } from "./chat";

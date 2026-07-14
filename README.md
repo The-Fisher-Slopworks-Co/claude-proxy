@@ -109,3 +109,7 @@ Notes:
   does not expose them).
 - The proxy listens on 127.0.0.1 and has no auth of its own — don't bind it
   to a public interface.
+
+## License
+
+AGPL-3.0-or-later. See [LICENSE](LICENSE).

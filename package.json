@@ -1,6 +1,7 @@
 {
   "name": "claude-proxy",
   "module": "src/index.ts",
+  "license": "AGPL-3.0-or-later",
   "scripts": {
     "dev": "bun --hot src/index.ts"
   },

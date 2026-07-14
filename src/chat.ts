@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 The Fisher Slopworks Co
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // POST /v1/chat/completions — translate OpenAI chat requests to SDK queries.
 import {
   query,
