@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 The Fisher Slopworks Co
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Keep the build context lean and secrets/state out of the image.
+.git
+.github
+node_modules
+
+# Never bake secrets in — env is supplied at runtime (-e / --env-file).
+.env
+.env.*
+
+# Docker + docs/meta not needed at runtime.
+Dockerfile
+.dockerignore
+README.md
+CLAUDE.md
+LICENSES
+REUSE.toml
+
+# Build/editor cruft.
+out
+dist
+coverage
+*.tsbuildinfo
+*.log
+logs
+.idea
+.DS_Store
