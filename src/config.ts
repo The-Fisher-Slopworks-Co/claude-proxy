@@ -5,6 +5,9 @@
 // ---- config ----
 export const HOST = process.env.HOST || "127.0.0.1";
 export const PORT = Number(process.env.PORT || 8787);
+// Client API key. Required — clients send `Authorization: Bearer <API_KEY>`.
+// The proxy refuses to start when unset (see index.ts). Convention: `sk-cproxy-...`.
+export const API_KEY = process.env.API_KEY || "";
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || "sonnet";
 // NOTE: comma-separated tool names, empty = all built-in tools off (safe default)
 export const ALLOWED_TOOLS = (process.env.ALLOWED_TOOLS || "")

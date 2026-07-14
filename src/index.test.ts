@@ -4,6 +4,7 @@
 
 import { test, expect } from "bun:test";
 import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
+import { isAuthorized } from "./auth";
 import { interpretResult } from "./chat";
 import {
   buildPrompt,
@@ -148,6 +149,17 @@ test("interpretResult classifies success and error results", () => {
       errors: ["a", "b"],
     } as unknown as SDKResultMessage),
   ).toEqual({ ok: false, subtype: "error_during_execution", detail: "a; b" });
+});
+
+test("isAuthorized accepts the exact bearer key and rejects everything else", () => {
+  const key = "sk-cproxy-secret";
+  expect(isAuthorized("Bearer sk-cproxy-secret", key)).toBe(true);
+  expect(isAuthorized("bearer sk-cproxy-secret", key)).toBe(true); // scheme case-insensitive
+  expect(isAuthorized("Bearer  sk-cproxy-secret  ", key)).toBe(true); // extra whitespace trimmed
+  expect(isAuthorized("Bearer sk-cproxy-wrong", key)).toBe(false);
+  expect(isAuthorized("sk-cproxy-secret", key)).toBe(false); // missing "Bearer " scheme
+  expect(isAuthorized(null, key)).toBe(false);
+  expect(isAuthorized("Bearer sk-cproxy-secret", "")).toBe(false); // no key configured
 });
 
 test("modelEntry maps family pricing and modalities", () => {

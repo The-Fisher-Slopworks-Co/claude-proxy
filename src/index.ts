@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // ---- startup ----
+import { authed } from "./auth";
 import { chatCompletions } from "./chat";
-import { ALLOWED_TOOLS, DEFAULT_MODEL, HOST, LOG_LEVEL, MODELS, PORT } from "./config";
+import { API_KEY, ALLOWED_TOOLS, DEFAULT_MODEL, HOST, LOG_LEVEL, MODELS, PORT } from "./config";
 import { log } from "./log";
 import { modelEntry, now, oaiError } from "./openai";
 
@@ -65,6 +66,13 @@ if (!Bun.which("claude")) {
   });
   process.exit(1);
 }
+if (!API_KEY) {
+  log("error", "startup.failed", {
+    reason:
+      'API_KEY is not set. Generate one (e.g. `echo "sk-cproxy-$(openssl rand -hex 32)"`) and put it in .env — the proxy refuses to start without it.',
+  });
+  process.exit(1);
+}
 if (process.env.ANTHROPIC_API_KEY)
   log("warn", "startup.api_key_ignored", {
     detail:
@@ -80,8 +88,8 @@ Bun.serve({
       log("debug", "request.access", { route: "/health" });
       return Response.json({ status: "ok" });
     },
-    "/v1/models": listModels,
-    "/v1/chat/completions": { POST: chatCompletions },
+    "/v1/models": authed(listModels),
+    "/v1/chat/completions": { POST: authed(chatCompletions) },
   },
   fetch: (req) => {
     log("info", "request.reject", {

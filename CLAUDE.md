@@ -14,14 +14,15 @@ claude setup-token      # one-time: mint the subscription OAuth token for .env
 ```
 
 Requires [Bun](https://bun.sh) and the Claude Code CLI (`claude`) on PATH.
-Config is env-only (see `.env.example`): `HOST`, `PORT`, `DEFAULT_MODEL`,
-`ALLOWED_TOOLS`, `LOG_LEVEL`, `LOG_FORMAT`.
+Config is env-only (see `.env.example`): `API_KEY` (required), `HOST`, `PORT`,
+`DEFAULT_MODEL`, `ALLOWED_TOOLS`, `LOG_LEVEL`, `LOG_FORMAT`.
 
 ## Architecture
 
 `src/` — no framework, `Bun.serve` routes only:
 
 - `index.ts`  — server, routes (`/health`, `/v1/models`, `/v1/chat/completions`), startup checks
+- `auth.ts`   — client auth: `Authorization: Bearer <API_KEY>` gate wrapping the `/v1/*` handlers
 - `chat.ts`   — `POST /v1/chat/completions`: OpenAI request -> SDK `query()`, JSON + SSE paths
 - `openai.ts` — OpenAI wire format: prompt building, response/chunk encoding, model+pricing metadata
 - `config.ts` — env parsing, model list, `childEnv`
@@ -39,7 +40,9 @@ list) -> `query()` -> `interpretResult` -> JSON completion or SSE stream.
 - `permissionMode: "dontAsk"` — never hang on a permission prompt.
 - `settingSources: []` — never leak local CLAUDE.md/settings into responses.
 - Stateless: clients send full history each request; it's rendered into one prompt.
-- Binds 127.0.0.1 only; the proxy has no auth of its own.
+- Client auth: every `/v1/*` request needs `Authorization: Bearer <API_KEY>`; the
+  proxy refuses to start when `API_KEY` is unset (fail-closed). `/health` stays open.
+- Binds 127.0.0.1 by default; `API_KEY` is what makes a wider bind safe (no TLS of its own).
 
 ## Conventions
 

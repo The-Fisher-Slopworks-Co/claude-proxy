@@ -24,11 +24,21 @@ bun install
 claude setup-token
 # put the printed token into .env
 cp .env.example .env
+
+# client API key — REQUIRED, the proxy refuses to start without it
+echo "sk-cproxy-$(openssl rand -hex 32)"   # put the result into .env as API_KEY
 ```
 
 If `CLAUDE_CODE_OAUTH_TOKEN` is unset, the proxy falls back to the CLI's
 stored login (`claude /login`). Either way `ANTHROPIC_API_KEY` is never passed
 to the Claude Code subprocess, so usage always bills the subscription.
+
+## Authentication
+
+Every `/v1/*` request must carry the configured key as an OpenAI-standard
+bearer token: `Authorization: Bearer <API_KEY>`. Requests without it (or with
+the wrong key) get `401`. `/health` stays open for liveness probes. The proxy
+**refuses to start** if `API_KEY` is unset, so it is never unintentionally open.
 
 ## Run
 
@@ -37,8 +47,8 @@ bun src/index.ts
 # claude-proxy: http://127.0.0.1:8787/v1
 ```
 
-Config via env (see `.env.example`): `HOST`, `PORT`, `DEFAULT_MODEL`
-(default `sonnet`), `ALLOWED_TOOLS`, `LOG_LEVEL`.
+Config via env (see `.env.example`): `API_KEY` (required), `HOST`, `PORT`,
+`DEFAULT_MODEL` (default `sonnet`), `ALLOWED_TOOLS`, `LOG_LEVEL`.
 
 ## Observability
 
@@ -72,6 +82,7 @@ Non-streaming:
 
 ```sh
 curl http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"sonnet","messages":[{"role":"user","content":"Say hi"}]}'
 ```
@@ -80,16 +91,17 @@ Streaming (SSE, ends with `data: [DONE]`):
 
 ```sh
 curl -N http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer $API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"model":"sonnet","stream":true,"messages":[{"role":"user","content":"Count to 5"}]}'
 ```
 
-Any OpenAI client — point it at the proxy; the API key is ignored:
+Any OpenAI client — point it at the proxy and pass your `API_KEY`:
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://127.0.0.1:8787/v1", api_key="unused")
+client = OpenAI(base_url="http://127.0.0.1:8787/v1", api_key="sk-cproxy-...")
 r = client.chat.completions.create(
     model="sonnet",
     messages=[{"role": "user", "content": "Say hi"}],
@@ -107,8 +119,10 @@ Notes:
   (standard OpenAI behavior). History is rendered into a single prompt.
 - `temperature`, `max_tokens` etc. are accepted and ignored (the Agent SDK
   does not expose them).
-- The proxy listens on 127.0.0.1 and has no auth of its own — don't bind it
-  to a public interface.
+- Requests to `/v1/*` require `Authorization: Bearer <API_KEY>` (see
+  [Authentication](#authentication)); `/health` is open.
+- The proxy listens on 127.0.0.1 by default. `API_KEY` is what makes a wider
+  bind safe, but it has no TLS — terminate HTTPS upstream if you expose it.
 
 ## License
 
