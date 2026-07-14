@@ -1,106 +1,48 @@
+# claude-proxy
 
-Default to using Bun instead of Node.js.
+Local OpenAI-compatible HTTP proxy in front of Claude Code. Accepts OpenAI Chat
+Completions requests and serves them through a Claude subscription via
+`@anthropic-ai/claude-agent-sdk`. Entry point: `src/index.ts`.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
-
-## APIs
-
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
-
-## Testing
-
-Use `bun test` to run tests.
-
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
-```
-
-## Frontend
-
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
-
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
-
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
-
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
+## Commands
 
 ```sh
-bun --hot ./index.ts
+bun src/index.ts        # run   -> http://127.0.0.1:8787/v1
+bun run dev             # run with --hot reload
+bun test                # run src/*.test.ts
+claude setup-token      # one-time: mint the subscription OAuth token for .env
 ```
 
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+Requires [Bun](https://bun.sh) and the Claude Code CLI (`claude`) on PATH.
+Config is env-only (see `.env.example`): `HOST`, `PORT`, `DEFAULT_MODEL`,
+`ALLOWED_TOOLS`, `LOG_LEVEL`, `LOG_FORMAT`.
+
+## Architecture
+
+`src/` — no framework, `Bun.serve` routes only:
+
+- `index.ts`  — server, routes (`/health`, `/v1/models`, `/v1/chat/completions`), startup checks
+- `chat.ts`   — `POST /v1/chat/completions`: OpenAI request -> SDK `query()`, JSON + SSE paths
+- `openai.ts` — OpenAI wire format: prompt building, response/chunk encoding, model+pricing metadata
+- `config.ts` — env parsing, model list, `childEnv`
+- `log.ts`    — one structured event per line (pretty on a TTY, JSON when piped)
+
+Flow: client request -> `buildPrompt` (history -> one interleaved text+image block
+list) -> `query()` -> `interpretResult` -> JSON completion or SSE stream.
+
+## Invariants (don't break these)
+
+- `ANTHROPIC_API_KEY` is stripped from the child env (`childEnv`) so usage always
+  bills the subscription OAuth, never an API key.
+- Built-in tools are **off by default** (`ALLOWED_TOOLS` empty) — proxy behaves like
+  a plain text model, never touches the filesystem.
+- `permissionMode: "dontAsk"` — never hang on a permission prompt.
+- `settingSources: []` — never leak local CLAUDE.md/settings into responses.
+- Stateless: clients send full history each request; it's rendered into one prompt.
+- Binds 127.0.0.1 only; the proxy has no auth of its own.
+
+## Conventions
+
+- Default to Bun, not Node: `bun <file>`, `bun test`, `bun install`, `Bun.serve`,
+  `Bun.file`, `Bun.$`. No express/vite/webpack/dotenv/ws. Bun auto-loads `.env`.
+- No frontend in this project. Bun docs: `node_modules/bun-types/docs/**.mdx`.

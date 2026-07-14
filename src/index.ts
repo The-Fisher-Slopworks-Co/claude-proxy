@@ -13,7 +13,7 @@ const staticModels = () =>
   });
 
 // Proxy Anthropic's GET /v1/models, mapped to the OpenAI list shape.
-// ponytail: no cache; add one if clients hammer this route
+// NOTE: no cache; add one if clients hammer this route
 async function listModels(): Promise<Response> {
   const key = process.env.ANTHROPIC_API_KEY;
   const oauth = process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -70,7 +70,7 @@ if (process.env.ANTHROPIC_API_KEY)
 Bun.serve({
   hostname: HOST,
   port: PORT,
-  idleTimeout: 255, // ponytail: Bun max; non-stream completions can be slow
+  idleTimeout: 255, // NOTE: Bun max; non-stream completions can be slow
   routes: {
     "/health": () => {
       log("debug", "request.access", { route: "/health" });

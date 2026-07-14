@@ -2,7 +2,7 @@
 export const HOST = process.env.HOST || "127.0.0.1";
 export const PORT = Number(process.env.PORT || 8787);
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || "sonnet";
-// ponytail: comma-separated tool names, empty = all built-in tools off (safe default)
+// NOTE: comma-separated tool names, empty = all built-in tools off (safe default)
 export const ALLOWED_TOOLS = (process.env.ALLOWED_TOOLS || "")
   .split(",")
   .map((s) => s.trim())

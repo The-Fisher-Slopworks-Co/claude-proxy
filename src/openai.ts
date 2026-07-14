@@ -64,7 +64,7 @@ export function buildPrompt(messages: ChatMessage[]): {
   const turns = messages.filter(
     (m) => m.role === "user" || m.role === "assistant",
   );
-  // ponytail: stateless — history is rendered into one interleaved block list
+  // NOTE: stateless — history is rendered into one interleaved block list
   // (text transcript with images kept in place); switch to SDK resume/sessions
   // if turn fidelity ever matters
   const single = turns.length === 1 && turns[0]!.role === "user";
@@ -181,7 +181,7 @@ export const SSE_DONE = "data: [DONE]\n\n";
 
 // USD strings (OpenRouter format): prompt, completion, cache read, cache write
 // (per token), image (per max-size image ≈ 1600 tokens × input price).
-// ponytail: family heuristic off the current Anthropic price sheet; update on price changes
+// NOTE: family heuristic off the current Anthropic price sheet; update on price changes
 const PRICING: Array<[RegExp, [string, string, string, string, string]]> = [
   [/opus/, ["0.000015", "0.000075", "0.0000015", "0.00001875", "0.024"]],
   [/haiku/, ["0.000001", "0.000005", "0.0000001", "0.00000125", "0.0016"]],
@@ -219,5 +219,5 @@ export function modelEntry(id: string, created: number, name = id) {
 }
 
 export const resolveModel = (m: string | undefined) =>
-  // ponytail: some OpenAI clients hardcode gpt-* — route them to the default
+  // NOTE: some OpenAI clients hardcode gpt-* — route them to the default
   !m || m.startsWith("gpt-") ? DEFAULT_MODEL : m;
